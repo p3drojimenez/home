@@ -14,3 +14,10 @@ input_boolean:
   lavadora_en_marcha:
     name: Lavadora en marcha
     icon: mdi:washing-machine
+
+device_tracker:
+  - platform: nmap_tracker
+    hosts: 192.168.1.0/24
+    home_interval: 10
+    consider_home: 180
+    track_new_devices: true
