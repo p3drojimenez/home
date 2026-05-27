@@ -1,0 +1,118 @@
+- id: ambientador_entrada
+  alias: Ambientador entrada — pulso 10 min cada hora 7-22
+  description: 'Enciende el enchufe del ambientador de la entrada durante 10 minutos
+    al inicio de cada hora, entre las 07:00 y las 22:00 (incluidas). Robusto a reinicios:
+    ON y OFF son triggers independientes.'
+  triggers:
+  - trigger: time_pattern
+    minutes: 0
+    id: pulse_on
+  - trigger: time_pattern
+    minutes: 10
+    id: pulse_off
+  conditions:
+  - condition: template
+    value_template: '{{ now().hour >= 7 and now().hour <= 22 }}'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: pulse_on
+      sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.ambientador_entrada
+    - conditions:
+      - condition: trigger
+        id: pulse_off
+      sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.ambientador_entrada
+  mode: single
+- id: lavadora_inicio
+  alias: Lavadora — detectar inicio
+  description: Cuando la potencia supera 5 W durante 30 s, marca la lavadora como en
+    marcha. Usa `input_boolean.lavadora_en_marcha` como bandera para que la automatización
+    de fin sepa que hubo un ciclo activo.
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.enchufe_lavadora_potencia
+    above: 5
+    for:
+      seconds: 30
+  conditions:
+  - condition: state
+    entity_id: input_boolean.lavadora_en_marcha
+    state: 'off'
+  actions:
+  - action: input_boolean.turn_on
+    target:
+      entity_id: input_boolean.lavadora_en_marcha
+  - action: logbook.log
+    data:
+      name: Lavadora
+      message: Ciclo iniciado
+      entity_id: switch.enchufe_lavadora
+  mode: single
+- id: lavadora_fin
+  alias: Lavadora — detectar fin y notificar
+  description: Cuando la potencia cae por debajo de 2 W durante 5 minutos y la lavadora
+    estaba en marcha, notifica que ha terminado e incluye la duración del ciclo.
+  triggers:
+  - trigger: numeric_state
+    entity_id: sensor.enchufe_lavadora_potencia
+    below: 2
+    for:
+      minutes: 5
+  conditions:
+  - condition: state
+    entity_id: input_boolean.lavadora_en_marcha
+    state: 'on'
+  actions:
+  - variables:
+      inicio: '{{ states.input_boolean.lavadora_en_marcha.last_changed }}'
+      duracion_min: '{{ ((now() - states.input_boolean.lavadora_en_marcha.last_changed).total_seconds()
+        / 60) | round(0) }}'
+  - action: input_boolean.turn_off
+    target:
+      entity_id: input_boolean.lavadora_en_marcha
+  - action: persistent_notification.create
+    data:
+      title: Lavadora terminada
+      message: 'La lavadora ha terminado. Duración: {{ duracion_min }} min.'
+      notification_id: lavadora_fin
+  - action: logbook.log
+    data:
+      name: Lavadora
+      message: 'Ciclo terminado ({{ duracion_min }} min)'
+      entity_id: switch.enchufe_lavadora
+  mode: single
+- id: luz_salon_2015
+  alias: Luz salón — 20:15 ON / 23:30 OFF
+  description: Enciende el enchufe de la luz del salón a las 20:15 y lo apaga a las
+    23:30. Todos los días.
+  triggers:
+  - trigger: time
+    at: '20:15:00'
+    id: 'on'
+  - trigger: time
+    at: '23:30:00'
+    id: 'off'
+  actions:
+  - choose:
+    - conditions:
+      - condition: trigger
+        id: 'on'
+      sequence:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.enchufe_luz_dormir
+    - conditions:
+      - condition: trigger
+        id: 'off'
+      sequence:
+      - action: switch.turn_off
+        target:
+          entity_id: switch.enchufe_luz_dormir
+  mode: single
