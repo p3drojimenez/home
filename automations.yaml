@@ -56,38 +56,89 @@
       entity_id: switch.enchufe_lavadora
   mode: single
 - id: lavadora_fin
-  alias: Lavadora — detectar fin y notificar
-  description: Cuando la potencia cae por debajo de 2 W durante 5 minutos y la lavadora
-    estaba en marcha, notifica que ha terminado e incluye la duración del ciclo.
+  alias: Lavadora — detectar fin y recordar hasta abrir puerta
+  description: Cuando la potencia cae por debajo de 2 W durante 8 min y la lavadora
+    estaba en marcha, notifica que ha terminado. Después, hasta que se abra la puerta
+    (binary_sensor.sensor_puerta_lavadora), reenvía recordatorio cada 30 min, con
+    tope de 6 (3 h). Sólo notifica si hay alguien en casa (fail-open si la presencia
+    no está operativa). mode=restart: un nuevo ciclo cancela los recordatorios pendientes
+    del anterior.
   triggers:
   - trigger: numeric_state
     entity_id: sensor.enchufe_lavadora_potencia
     below: 2
     for:
-      minutes: 5
+      minutes: 8
   conditions:
   - condition: state
     entity_id: input_boolean.lavadora_en_marcha
     state: 'on'
   actions:
   - variables:
-      inicio: '{{ states.input_boolean.lavadora_en_marcha.last_changed }}'
       duracion_min: '{{ ((now() - states.input_boolean.lavadora_en_marcha.last_changed).total_seconds()
         / 60) | round(0) }}'
   - action: input_boolean.turn_off
     target:
       entity_id: input_boolean.lavadora_en_marcha
-  - action: persistent_notification.create
-    data:
-      title: Lavadora terminada
-      message: 'La lavadora ha terminado. Duración: {{ duracion_min }} min.'
-      notification_id: lavadora_fin
   - action: logbook.log
     data:
       name: Lavadora
       message: 'Ciclo terminado ({{ duracion_min }} min)'
       entity_id: switch.enchufe_lavadora
-  mode: single
+  - if:
+    - condition: template
+      value_template: "{% set pedro = states('person.pedro') %}\n{% set inki = states('person.inki')
+        %}\n{% set src_pedro = state_attr('person.pedro', 'source') %}\n{% set src_inki
+        = state_attr('person.inki', 'source') %}\n{{ (src_pedro == none and src_inki
+        == none) or pedro == 'home' or inki == 'home' }}\n"
+    then:
+    - parallel:
+      - action: persistent_notification.create
+        data:
+          title: Lavadora terminada
+          message: 'Duración: {{ duracion_min }} min. Abre la puerta cuando vacíes.'
+          notification_id: lavadora_fin
+      - continue_on_error: true
+        action: notify.send_message
+        target:
+          entity_id: notify.iphone_de_pedro_2
+        data:
+          title: Lavadora terminada
+          message: 'Duración: {{ duracion_min }} min. Vacía y abre la puerta.'
+    - repeat:
+        count: 6
+        sequence:
+        - wait_template: "{{ is_state('binary_sensor.sensor_puerta_lavadora', 'on')
+            }}"
+          timeout:
+            minutes: 30
+          continue_on_timeout: true
+        - if:
+          - condition: template
+            value_template: '{{ wait.completed }}'
+          then:
+          - action: persistent_notification.dismiss
+            data:
+              notification_id: lavadora_fin
+          - stop: Puerta abierta, fin de recordatorios
+          else:
+          - if:
+            - condition: template
+              value_template: "{% set pedro = states('person.pedro') %}\n{% set inki
+                = states('person.inki') %}\n{% set src_pedro = state_attr('person.pedro',
+                'source') %}\n{% set src_inki = state_attr('person.inki', 'source')
+                %}\n{{ (src_pedro == none and src_inki == none) or pedro == 'home'
+                or inki == 'home' }}\n"
+            then:
+            - continue_on_error: true
+              action: notify.send_message
+              target:
+                entity_id: notify.iphone_de_pedro_2
+              data:
+                title: Lavadora — recordatorio
+                message: 'Sigue sin vaciar (terminó hace {{ ((now() - states.binary_sensor.sensor_puerta_lavadora.last_changed).total_seconds()
+                  / 60) | round(0) }} min).'
+  mode: restart
 - id: luz_salon_2015
   alias: Luz salón — 20:15 ON / 23:30 OFF
   description: Enciende el enchufe de la luz del salón a las 20:15 y lo apaga a las
